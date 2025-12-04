@@ -1,0 +1,16 @@
+{
+  "nodes": [
+    {
+      "name": "node1",
+      "db_path": "./node1"
+    },
+    {
+      "name": "node2",
+      "db_path": "./node2"
+    },
+    {
+      "name": "node3",
+      "db_path": "./node3"
+    }
+  ]
+}
