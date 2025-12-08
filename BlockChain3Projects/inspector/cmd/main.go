@@ -4,6 +4,8 @@ import (
     "encoding/json"
     "flag"
     "fmt"
+    "io/ioutil"
+    "log"
     "os"
     "time"
 
@@ -19,33 +21,66 @@ import (
 
 const version = "1.0.0"
 
+// DAY 1: JSON OUTPUT STRUCT [file:15]
+type BlockJSON struct {
+    Height       int    `json:"height"`
+    BlockHash    string `json:"blockHash"`
+    PreviousHash string `json:"previousHash"`
+    TxCount      int    `json:"txCount"`
+}
+
+var verboseFlag bool
+
 func main() {
-    // Day 1 flags
+    // DAY 1 PDF-REQUIRED FLAGS [file:15]
+    path := flag.String("path", "", "leveldb-path (Day 1)")
+    compare1 := flag.String("compare1", "", "path1 for comparison")
+    compare2 := flag.String("compare2", "", "path2 for comparison")
+    height := flag.Int("height", 0, "block height n")
+    jsonOutput := flag.Bool("json", false, "export structured JSON output")
+    verbose := flag.Bool("verbose", false, "verbose logging")
+    quiet := flag.Bool("quiet", false, "quiet mode")
+    
+    // EXISTING FLAGS
     dbPath := flag.String("db", "./leveldb-data", "Path to LevelDB database")
     db1Path := flag.String("db1", "./node1-data", "Path to first database")
     db2Path := flag.String("db2", "./node2-data", "Path to second database")
     cmd := flag.String("cmd", "help", "Command: load, block, scan-errors, compare, consensus, watch, report")
     numBlocks := flag.Int("blocks", 10, "Number of blocks to load")
-    jsonOutput := flag.Bool("json", false, "Output in JSON format")
     showVersion := flag.Bool("version", false, "Show version")
-    
-    // RPC flags
-    rpcURL := flag.String("rpc", "", "RPC endpoint URL (e.g., http://localhost:8545)")
+    rpcURL := flag.String("rpc", "", "RPC endpoint URL")
     watchInterval := flag.Int("interval", 2, "Watch mode interval in seconds")
-    
-    // Day 2 flags
     configPath := flag.String("config", "nodes.json", "Path to network config file")
-    
-    // Day 3 flags
-    reportPath := flag.String("report", "inspector-report.json", "Output path for generated report")
+    reportPath := flag.String("report", "inspector-report.json", "Output path for report")
     
     flag.Parse()
+
+    // DAY 1: LOGGING CONTROL [file:15]
+    verboseFlag = *verbose
+    if *verbose {
+        log.SetFlags(log.LstdFlags | log.Lshortfile)
+        log.Println("✓ Verbose mode enabled")
+    } else if *quiet {
+        log.SetOutput(ioutil.Discard)
+    }
 
     if *showVersion {
         fmt.Printf("BHIV Chain Inspector v%s\n", version)
         return
     }
 
+    // DAY 1: SHORTCUT ROUTES [file:15]
+    if *path != "" && *height > 0 {
+        viewBlockDay1(*path, *rpcURL, *height, *jsonOutput)
+        return
+    }
+    
+    if *compare1 != "" && *compare2 != "" {
+        compareNodesDay1(*compare1, *compare2, *jsonOutput)
+        return
+    }
+
+    // EXISTING COMMANDS
     switch *cmd {
     case "load":
         loadSampleData(*dbPath, *numBlocks)
@@ -67,6 +102,90 @@ func main() {
         fmt.Printf("Unknown command: %s\n", *cmd)
         printUsage()
     }
+}
+
+// DAY 1: NEW FUNCTION [file:15]
+func viewBlockDay1(dbPath, rpcURL string, height int, jsonMode bool) {
+    var block *blocks.Block
+    var err error
+    
+    if rpcURL != "" {
+        if verboseFlag {
+            log.Printf("Fetching block %d from RPC: %s", height, rpcURL)
+        }
+        client := rpc.NewClient(rpcURL)
+        block, err = client.FetchBlock(height)
+        if err != nil {
+            errors.FormatError("BLOCK_FETCH_FAILED", err.Error(), height)
+            return
+        }
+    } else {
+        if verboseFlag {
+            log.Printf("Opening database: %s", dbPath)
+        }
+        storage, err := db.NewStorage(dbPath)
+        if err != nil {
+            errors.FormatError("DB_OPEN_FAILED", err.Error(), height)
+            return
+        }
+        defer storage.Close()
+        
+        if verboseFlag {
+            log.Printf("Loading block at height: %d", height)
+        }
+        block, err = storage.LoadBlock(height)
+        if err != nil {
+            errors.FormatError("BLOCK_FETCH_FAILED", err.Error(), height)
+            return
+        }
+    }
+
+    output := BlockJSON{
+        Height:       block.Height,
+        BlockHash:    block.Hash,
+        PreviousHash: block.PrevHash,
+        TxCount:      1,
+    }
+
+    if jsonMode {
+        encoder := json.NewEncoder(os.Stdout)
+        encoder.SetIndent("", "  ")
+        encoder.Encode(output)
+    } else {
+        fmt.Printf("\n=== Block %d ===\n", output.Height)
+        fmt.Printf("Hash:      %s\n", output.BlockHash)
+        fmt.Printf("PrevHash:  %s\n", output.PreviousHash)
+        fmt.Printf("TxCount:   %d\n\n", output.TxCount)
+    }
+}
+
+// DAY 1: NEW FUNCTION [file:15]
+func compareNodesDay1(path1, path2 string, jsonMode bool) {
+    if verboseFlag {
+        log.Printf("Opening node 1: %s", path1)
+    }
+    storage1, err := db.NewStorage(path1)
+    if err != nil {
+        errors.FormatError("DB_OPEN_FAILED", fmt.Sprintf("Node1: %v", err), 0)
+        return
+    }
+    defer storage1.Close()
+
+    if verboseFlag {
+        log.Printf("Opening node 2: %s", path2)
+    }
+    storage2, err := db.NewStorage(path2)
+    if err != nil {
+        errors.FormatError("DB_OPEN_FAILED", fmt.Sprintf("Node2: %v", err), 0)
+        return
+    }
+    defer storage2.Close()
+
+    if verboseFlag {
+        log.Println("Starting node comparison...")
+    }
+    result := errors.CompareNodes(storage1, storage2, path1, path2)
+    errors.OutputComparisonResult(result, jsonMode)
 }
 
 func loadSampleData(dbPath string, numBlocks int) {
@@ -271,41 +390,34 @@ func runFullReport(configPath, reportPath string) {
 
 func printUsage() {
     fmt.Println("\n╔════════════════════════════════════════════════════════════════╗")
-    fmt.Println("║          BHIV BLOCKCHAIN INSPECTOR CLI v1.0                   ║")
+    fmt.Println("║          BHIV BLOCKCHAIN INSPECTOR CLI v1.0 - DAY 1           ║")
     fmt.Println("╚════════════════════════════════════════════════════════════════╝")
-    fmt.Println("\n📋 COMMANDS:")
-    fmt.Println("  load        Load sample blockchain data into LevelDB")
-    fmt.Println("  block       View a specific block (LevelDB or RPC)")
-    fmt.Println("  scan-errors Comprehensive blockchain error scanning")
-    fmt.Println("  compare     Compare two blockchain databases")
-    fmt.Println("  consensus   Multi-node consensus analysis (Day 2)")
-    fmt.Println("  watch       Real-time node monitoring via RPC")
-    fmt.Println("  report      Generate comprehensive JSON report (Day 3)")
-    fmt.Println("  help        Show this help message")
     
-    fmt.Println("\n💡 EXAMPLES:")
+    fmt.Println("\n📋 DAY 1 COMMANDS (PDF Required):")
+    fmt.Println("  inspector --path <db> --height <n> [--json] [--verbose]")
+    fmt.Println("  inspector --compare1 <path1> --compare2 <path2> [--json]")
     
-    fmt.Println("\n  Day 1 - Basic Operations:")
-    fmt.Println("    inspector -cmd load -db ./data -blocks 50")
-    fmt.Println("    inspector -cmd block 10 --db ./data")
-    fmt.Println("    inspector -cmd block 10 --rpc http://localhost:8545")
-    fmt.Println("    inspector -cmd scan-errors --db ./data")
-    fmt.Println("    inspector -cmd compare -db1 ./node1 -db2 ./node2")
+    fmt.Println("\n💡 DAY 1 EXAMPLES (Record These):")
+    fmt.Println("  inspector --path ./data --height 10 --json")
+    fmt.Println("  inspector --path ./data --height 5 --verbose")
+    fmt.Println("  inspector --compare1 ./node1 --compare2 ./node2 --json")
     
-    fmt.Println("\n  Day 2 - Consensus Analysis:")
-    fmt.Println("    inspector -cmd consensus --config nodes.json")
-    fmt.Println("    inspector -cmd consensus --config nodes.json --json")
+    fmt.Println("\n📋 ORIGINAL COMMANDS:")
+    fmt.Println("  load        Load sample blocks")
+    fmt.Println("  block       View specific block")
+    fmt.Println("  scan-errors Scan for errors")
+    fmt.Println("  compare     Compare two nodes")
+    fmt.Println("  consensus   Consensus analysis")
+    fmt.Println("  watch       Real-time monitoring")
+    fmt.Println("  report      Generate report")
     
-    fmt.Println("\n  Day 3 - Advanced:")
-    fmt.Println("    inspector -cmd watch --rpc http://localhost:8545 --interval 2")
-    fmt.Println("    inspector -cmd report --config nodes.json --report network-report.json")
-    
-    fmt.Println("\n🔧 OPTIONS:")
-    fmt.Println("  --db         Path to LevelDB database")
-    fmt.Println("  --rpc        RPC endpoint URL")
-    fmt.Println("  --config     Network config file (JSON)")
-    fmt.Println("  --json       Output in JSON format")
-    fmt.Println("  --interval   Watch mode polling interval")
-    fmt.Println("  --report     Report output path")
+    fmt.Println("\n🔧 FLAGS:")
+    fmt.Println("  --path       leveldb-path")
+    fmt.Println("  --height     block height")
+    fmt.Println("  --compare1   first node path")
+    fmt.Println("  --compare2   second node path")
+    fmt.Println("  --json       JSON output")
+    fmt.Println("  --verbose    verbose mode")
+    fmt.Println("  --quiet      quiet mode")
     fmt.Println()
 }

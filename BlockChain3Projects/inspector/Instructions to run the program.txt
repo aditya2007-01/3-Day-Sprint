@@ -1,0 +1,22 @@
+C:\Users\khand\OneDrive\Desktop\BlockChain3Projects\inspector
+go build -o inspector.exe ./cmd
+
+# Test Day 1 commands
+inspector.exe --help
+inspector.exe --path ./data --height 10 --json
+inspector.exe --compare1 ./node1 --compare2 ./node2 --json
+
+
+# Test Day 2 commands 
+
+# Run all tests
+go test ./... -v
+
+# Run with coverage
+go test ./... -v -cover
+
+# Build for all platforms
+.\scripts\build.bat
+
+# Verify dist folder
+dir dist

@@ -3,9 +3,36 @@ package errors
 import (
     "encoding/json"
     "fmt"
+    "os"
     "strings"
 )
 
+// DAY 1: CENTRALIZED ERROR HANDLING [file:15]
+type BlockError struct {
+    Height int    `json:"height"`
+    Code   string `json:"code"`
+    Msg    string `json:"message"`
+}
+
+// DAY 1: NEW FUNCTION - Format and exit with error [file:15]
+func FormatError(code, msg string, height int) {
+    err := BlockError{
+        Height: height,
+        Code:   code,
+        Msg:    msg,
+    }
+    
+    // JSON output to stderr
+    encoder := json.NewEncoder(os.Stderr)
+    encoder.SetIndent("", "  ")
+    encoder.Encode(err)
+    
+    // Human-readable output
+    fmt.Fprintf(os.Stderr, "❌ [%s] %s (height=%d)\n", code, msg, height)
+    os.Exit(1)
+}
+
+// YOUR EXISTING FUNCTIONS (KEEP AS IS)
 func OutputScanResult(result *ErrorScanResult, jsonMode bool) {
     if jsonMode {
         outputJSON(result)
